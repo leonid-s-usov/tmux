@@ -608,12 +608,37 @@ input_key_get_mouse(struct screen *s, struct mouse_event *m, u_int x, u_int y,
 		len += input_key_split2(x + 33, &buf[len]);
 		len += input_key_split2(y + 33, &buf[len]);
 	} else {
-		if (m->b > 223)
+		/*
+		 * The legacy X11 mode will encode all parameters as 3 chars
+		 * where each one is offset by 32.
+		 * See https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking
+		 *
+		 * x and y are further offset by 1 here to have (1,1) refer to the
+		 * upper left corner as per the requirements of the protocol
+		 *
+		 * Since the SGR support has been added to tmux, the incoming
+		 * x and y may be greater than the original X11 protocol can support.
+		 * Whereas for the button parameter there's no meaningful mitigation,
+		 * the coordinates should be sanitized and clamped to the supported range.
+		 * xterm is doing just that.
+		 */
+		const u_int X11_MOUSE_PARAM_OFFSET = 32;
+		const u_int X11_MOUSE_PARAM_MAX = UCHAR_MAX;
+
+		u_int prep_b = m->b + X11_MOUSE_PARAM_OFFSET;
+
+		if (prep_b > X11_MOUSE_PARAM_MAX) {
+			// no meaningful mitigation to this, drop the event.
 			return (0);
+		}
+
+		u_int prep_cx = x + 1 + X11_MOUSE_PARAM_OFFSET;
+		u_int prep_cy = y + 1 + X11_MOUSE_PARAM_OFFSET;
+
 		len = xsnprintf(buf, sizeof buf, "\033[M");
-		buf[len++] = m->b + 32;
-		buf[len++] = x + 33;
-		buf[len++] = y + 33;
+		buf[len++] = prep_b;
+		buf[len++] = prep_cx < X11_MOUSE_PARAM_MAX ? prep_cx : X11_MOUSE_PARAM_MAX;
+		buf[len++] = prep_cy < X11_MOUSE_PARAM_MAX ? prep_cy : X11_MOUSE_PARAM_MAX;
 	}
 
 	*rbuf = buf;
